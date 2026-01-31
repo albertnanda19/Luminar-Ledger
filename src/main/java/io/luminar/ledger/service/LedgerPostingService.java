@@ -15,6 +15,7 @@ import io.luminar.ledger.infrastructure.persistence.account.AccountBalanceJpaRep
 import io.luminar.ledger.infrastructure.persistence.account.AccountEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.account.AccountStatusEntity;
+import io.luminar.ledger.infrastructure.persistence.account.AccountTypeEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntryEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntryJpaRepository;
@@ -88,7 +89,11 @@ public class LedgerPostingService {
 			return concurrent.getId();
 		}
 
-		applyBalanceUpdates(domainTransaction.entries());
+		Map<UUID, AccountTypeEntity> accountTypes = new HashMap<>();
+		for (AccountEntity a : lockedAccounts) {
+			accountTypes.put(a.getId(), a.getType());
+		}
+		applyBalanceUpdates(domainTransaction.entries(), accountTypes);
 		return domainTransaction.id();
 	}
 
@@ -139,24 +144,45 @@ public class LedgerPostingService {
 				entries);
 	}
 
-	private void applyBalanceUpdates(List<LedgerEntry> entries) {
+	private void applyBalanceUpdates(List<LedgerEntry> entries, Map<UUID, AccountTypeEntity> accountTypes) {
 		Map<UUID, BigDecimal> netChanges = aggregateNetChanges(entries);
 		Set<UUID> accountIds = netChanges.keySet();
-		Iterable<UUID> accountIdIterable = accountIds;
-		List<AccountBalanceEntity> balances = accountBalanceJpaRepository
-				.findAllById(Objects.requireNonNull(accountIdIterable));
+		List<AccountBalanceEntity> balances = accountBalanceJpaRepository.findByAccountIdIn(accountIds);
 		if (balances.size() != accountIds.size()) {
 			throw new DomainException("Account balance record missing for one or more accounts");
 		}
 
 		for (Map.Entry<UUID, BigDecimal> change : netChanges.entrySet()) {
-			int updated = entityManager.createQuery(
+			UUID accountId = change.getKey();
+			BigDecimal delta = change.getValue();
+			AccountTypeEntity type = accountTypes.get(accountId);
+			if (type == null) {
+				throw new DomainException("Account type missing for accountId: " + accountId);
+			}
+
+			int updated;
+			if (delta.signum() < 0 && type == AccountTypeEntity.ASSET) {
+				BigDecimal required = delta.negate();
+				updated = entityManager.createQuery(
+						"update AccountBalanceEntity b set b.balance = b.balance + :delta " +
+								"where b.accountId = :accountId and b.balance >= :required")
+						.setParameter("delta", delta)
+						.setParameter("accountId", accountId)
+						.setParameter("required", required)
+						.executeUpdate();
+				if (updated != 1) {
+					throw new DomainException("Insufficient funds for accountId: " + accountId);
+				}
+				continue;
+			}
+
+			updated = entityManager.createQuery(
 					"update AccountBalanceEntity b set b.balance = b.balance + :delta where b.accountId = :accountId")
-					.setParameter("delta", change.getValue())
-					.setParameter("accountId", change.getKey())
+					.setParameter("delta", delta)
+					.setParameter("accountId", accountId)
 					.executeUpdate();
 			if (updated != 1) {
-				throw new DomainException("Account balance update failed for accountId: " + change.getKey());
+				throw new DomainException("Account balance update failed for accountId: " + accountId);
 			}
 		}
 	}
