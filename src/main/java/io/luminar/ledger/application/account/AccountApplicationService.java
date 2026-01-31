@@ -1,6 +1,9 @@
 package io.luminar.ledger.application.account;
 
+import io.luminar.ledger.application.account.command.CloseAccountCommand;
 import io.luminar.ledger.application.account.command.CreateAccountCommand;
+import io.luminar.ledger.application.account.command.FreezeAccountCommand;
+import io.luminar.ledger.application.account.command.UnfreezeAccountCommand;
 import io.luminar.ledger.domain.account.Account;
 import io.luminar.ledger.domain.account.AccountId;
 import io.luminar.ledger.domain.account.Currency;
@@ -19,6 +22,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import static org.springframework.http.HttpStatus.CONFLICT;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
 public class AccountApplicationService {
@@ -60,5 +64,44 @@ public class AccountApplicationService {
 		}
 
 		return account.id().value();
+	}
+
+	@Transactional
+	public void freeze(FreezeAccountCommand command) {
+		Objects.requireNonNull(command, "FreezeAccountCommand is required");
+		AccountEntity entity = accountJpaRepository.findByIdForUpdate(command.accountId())
+				.orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Account not found: " + command.accountId()));
+		Account current = AccountPersistenceMapper.toDomain(entity);
+		Account updated = current.freeze(command.reason());
+		applyLifecycle(entity, updated);
+	}
+
+	@Transactional
+	public void unfreeze(UnfreezeAccountCommand command) {
+		Objects.requireNonNull(command, "UnfreezeAccountCommand is required");
+		AccountEntity entity = accountJpaRepository.findByIdForUpdate(command.accountId())
+				.orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Account not found: " + command.accountId()));
+		Account current = AccountPersistenceMapper.toDomain(entity);
+		Account updated = current.unfreeze(command.reason());
+		applyLifecycle(entity, updated);
+	}
+
+	@Transactional
+	public void close(CloseAccountCommand command) {
+		Objects.requireNonNull(command, "CloseAccountCommand is required");
+		AccountEntity entity = accountJpaRepository.findByIdForUpdate(command.accountId())
+				.orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Account not found: " + command.accountId()));
+		Account current = AccountPersistenceMapper.toDomain(entity);
+		Account updated = current.close(command.reason());
+		applyLifecycle(entity, updated);
+	}
+
+	private static void applyLifecycle(AccountEntity entity, Account updated) {
+		AccountEntity mapped = AccountPersistenceMapper.toEntity(updated);
+		entity.setStatus(mapped.getStatus());
+		entity.setFrozenAt(mapped.getFrozenAt());
+		entity.setClosedAt(mapped.getClosedAt());
+		entity.setStatusChangedAt(mapped.getStatusChangedAt());
+		entity.setStatusReason(mapped.getStatusReason());
 	}
 }

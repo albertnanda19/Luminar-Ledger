@@ -9,12 +9,12 @@ import io.luminar.ledger.domain.ledger.EntryType;
 import io.luminar.ledger.domain.ledger.LedgerEntry;
 import io.luminar.ledger.domain.ledger.LedgerTransaction;
 import io.luminar.ledger.domain.ledger.Money;
+import io.luminar.ledger.infrastructure.mapper.AccountPersistenceMapper;
 import io.luminar.ledger.infrastructure.mapper.LedgerPersistenceMapper;
 import io.luminar.ledger.infrastructure.persistence.account.AccountBalanceEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountBalanceJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.account.AccountEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountJpaRepository;
-import io.luminar.ledger.infrastructure.persistence.account.AccountStatusEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountTypeEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntryEntity;
@@ -116,9 +116,7 @@ public class LedgerPostingService {
 
 		String currency = lockedAccounts.getFirst().getCurrency();
 		for (AccountEntity account : lockedAccounts) {
-			if (account.getStatus() != AccountStatusEntity.ACTIVE) {
-				throw new DomainException("Account is not ACTIVE: " + account.getId());
-			}
+			AccountPersistenceMapper.toDomain(account).assertPostingAllowed();
 			if (!currency.equals(account.getCurrency())) {
 				throw new DomainException("Transaction accounts must be single-currency");
 			}

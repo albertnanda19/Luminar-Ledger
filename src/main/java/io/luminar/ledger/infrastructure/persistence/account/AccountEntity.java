@@ -41,6 +41,18 @@ public class AccountEntity {
 	@Column(name = "status", nullable = false, columnDefinition = "account_status")
 	private AccountStatusEntity status;
 
+	@Column(name = "frozen_at")
+	private Instant frozenAt;
+
+	@Column(name = "closed_at")
+	private Instant closedAt;
+
+	@Column(name = "status_changed_at", nullable = false)
+	private Instant statusChangedAt;
+
+	@Column(name = "status_reason", nullable = false, length = 256)
+	private String statusReason;
+
 	@Column(name = "created_at", nullable = false, updatable = false, insertable = false)
 	private Instant createdAt;
 
@@ -48,13 +60,18 @@ public class AccountEntity {
 	}
 
 	public AccountEntity(UUID id, String code, String name, AccountTypeEntity type, String currency,
-			AccountStatusEntity status) {
+			AccountStatusEntity status, Instant frozenAt, Instant closedAt, Instant statusChangedAt,
+			String statusReason) {
 		this.id = id;
 		this.code = code;
 		this.name = name;
 		this.type = type;
 		this.currency = currency;
 		this.status = status;
+		this.frozenAt = frozenAt;
+		this.closedAt = closedAt;
+		this.statusChangedAt = statusChangedAt;
+		this.statusReason = statusReason;
 	}
 
 	public UUID getId() {
@@ -79,6 +96,42 @@ public class AccountEntity {
 
 	public AccountStatusEntity getStatus() {
 		return status;
+	}
+
+	public void setStatus(AccountStatusEntity status) {
+		this.status = status;
+	}
+
+	public Instant getFrozenAt() {
+		return frozenAt;
+	}
+
+	public void setFrozenAt(Instant frozenAt) {
+		this.frozenAt = frozenAt;
+	}
+
+	public Instant getClosedAt() {
+		return closedAt;
+	}
+
+	public void setClosedAt(Instant closedAt) {
+		this.closedAt = closedAt;
+	}
+
+	public Instant getStatusChangedAt() {
+		return statusChangedAt;
+	}
+
+	public void setStatusChangedAt(Instant statusChangedAt) {
+		this.statusChangedAt = statusChangedAt;
+	}
+
+	public String getStatusReason() {
+		return statusReason;
+	}
+
+	public void setStatusReason(String statusReason) {
+		this.statusReason = statusReason;
 	}
 
 	public Instant getCreatedAt() {

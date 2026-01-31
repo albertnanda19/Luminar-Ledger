@@ -23,7 +23,11 @@ public final class AccountPersistenceMapper {
 				account.name(),
 				toEntityType(account.type()),
 				account.currency().code(),
-				toEntityStatus(account.status()));
+				toEntityStatus(account.status()),
+				account.frozenAt(),
+				account.closedAt(),
+				account.statusChangedAt(),
+				account.statusReason());
 	}
 
 	public static Account toDomain(AccountEntity entity) {
@@ -33,7 +37,11 @@ public final class AccountPersistenceMapper {
 				entity.getName(),
 				toDomainType(entity.getType()),
 				new Currency(entity.getCurrency()),
-				toDomainStatus(entity.getStatus()));
+				toDomainStatus(entity.getStatus()),
+				entity.getFrozenAt(),
+				entity.getClosedAt(),
+				entity.getStatusChangedAt(),
+				entity.getStatusReason());
 	}
 
 	public static BigDecimal toBalance(AccountBalanceEntity entity) {
@@ -43,16 +51,16 @@ public final class AccountPersistenceMapper {
 	private static AccountStatusEntity toEntityStatus(AccountStatus status) {
 		return switch (status) {
 			case ACTIVE -> AccountStatusEntity.ACTIVE;
-			case SUSPENDED -> AccountStatusEntity.FROZEN;
-			case CLOSED ->
-				throw new IllegalArgumentException("AccountStatus.CLOSED is not representable in persistence");
+			case FROZEN -> AccountStatusEntity.FROZEN;
+			case CLOSED -> AccountStatusEntity.CLOSED;
 		};
 	}
 
 	private static AccountStatus toDomainStatus(AccountStatusEntity status) {
 		return switch (status) {
 			case ACTIVE -> AccountStatus.ACTIVE;
-			case FROZEN -> AccountStatus.SUSPENDED;
+			case FROZEN -> AccountStatus.FROZEN;
+			case CLOSED -> AccountStatus.CLOSED;
 		};
 	}
 
