@@ -22,6 +22,17 @@ public class AccountEntity {
 	@Column(name = "id", nullable = false, updatable = false)
 	private UUID id;
 
+	@Column(name = "code", nullable = false, length = 64, updatable = false)
+	private String code;
+
+	@Column(name = "name", nullable = false, length = 128)
+	private String name;
+
+	@Enumerated(EnumType.STRING)
+	@JdbcTypeCode(SqlTypes.NAMED_ENUM)
+	@Column(name = "type", nullable = false, columnDefinition = "account_type", updatable = false)
+	private AccountTypeEntity type;
+
 	@Column(name = "currency", nullable = false, length = 3)
 	private String currency;
 
@@ -36,14 +47,30 @@ public class AccountEntity {
 	protected AccountEntity() {
 	}
 
-	public AccountEntity(UUID id, String currency, AccountStatusEntity status) {
+	public AccountEntity(UUID id, String code, String name, AccountTypeEntity type, String currency,
+			AccountStatusEntity status) {
 		this.id = id;
+		this.code = code;
+		this.name = name;
+		this.type = type;
 		this.currency = currency;
 		this.status = status;
 	}
 
 	public UUID getId() {
 		return id;
+	}
+
+	public String getCode() {
+		return code;
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public AccountTypeEntity getType() {
+		return type;
 	}
 
 	public String getCurrency() {

@@ -4,26 +4,45 @@ import java.util.Objects;
 
 public final class Account {
 	private final AccountId id;
+	private final String code;
+	private final String name;
+	private final AccountType type;
 	private final Currency currency;
 	private final AccountStatus status;
 
-	private Account(AccountId id, Currency currency, AccountStatus status) {
-		AccountPolicy.validate(id, currency, status);
+	private Account(AccountId id, String code, String name, AccountType type, Currency currency, AccountStatus status) {
+		AccountPolicy.validate(id, code, name, type, currency, status);
 		this.id = id;
+		this.code = code;
+		this.name = name;
+		this.type = type;
 		this.currency = currency;
 		this.status = status;
 	}
 
-	public static Account open(AccountId id, Currency currency) {
-		return new Account(id, currency, AccountStatus.ACTIVE);
+	public static Account open(AccountId id, String code, String name, AccountType type, Currency currency) {
+		return new Account(id, code, name, type, currency, AccountStatus.ACTIVE);
 	}
 
-	public static Account rehydrate(AccountId id, Currency currency, AccountStatus status) {
-		return new Account(id, currency, status);
+	public static Account rehydrate(AccountId id, String code, String name, AccountType type, Currency currency,
+			AccountStatus status) {
+		return new Account(id, code, name, type, currency, status);
 	}
 
 	public AccountId id() {
 		return id;
+	}
+
+	public String code() {
+		return code;
+	}
+
+	public String name() {
+		return name;
+	}
+
+	public AccountType type() {
+		return type;
 	}
 
 	public Currency currency() {
