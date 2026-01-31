@@ -1,3 +1,17 @@
 spring:
   application:
     name: luminar-ledger
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/luminar_ledger
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    clean-disabled: true
