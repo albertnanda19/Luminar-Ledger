@@ -9,28 +9,34 @@ import io.luminar.ledger.domain.ledger.EntryType;
 import io.luminar.ledger.domain.ledger.LedgerEntry;
 import io.luminar.ledger.domain.ledger.LedgerTransaction;
 import io.luminar.ledger.domain.ledger.Money;
+import io.luminar.ledger.domain.ledger.event.LedgerTransactionRecordedEvent;
 import io.luminar.ledger.infrastructure.mapper.AccountPersistenceMapper;
+import io.luminar.ledger.infrastructure.mapper.LedgerEventPersistenceMapper;
 import io.luminar.ledger.infrastructure.mapper.LedgerPersistenceMapper;
 import io.luminar.ledger.infrastructure.persistence.account.AccountBalanceEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountBalanceJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.account.AccountEntity;
 import io.luminar.ledger.infrastructure.persistence.account.AccountJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.account.AccountTypeEntity;
+import io.luminar.ledger.infrastructure.persistence.ledger.LedgerEventEntity;
+import io.luminar.ledger.infrastructure.persistence.ledger.LedgerEventJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntryEntity;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntryJpaRepository;
 import io.luminar.ledger.infrastructure.persistence.ledger.TransactionJpaRepository;
-import io.luminar.ledger.infrastructure.persistence.ledger.TransactionStatusEntity;
 import jakarta.persistence.EntityManager;
-import org.springframework.dao.DataIntegrityViolationException;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,21 +48,27 @@ import java.util.UUID;
 public class LedgerPostingService {
 	private final TransactionJpaRepository transactionJpaRepository;
 	private final TransactionEntryJpaRepository transactionEntryJpaRepository;
+	private final LedgerEventJpaRepository ledgerEventJpaRepository;
 	private final AccountJpaRepository accountJpaRepository;
 	private final AccountBalanceJpaRepository accountBalanceJpaRepository;
 	private final EntityManager entityManager;
+	private final ObjectMapper objectMapper;
 
 	public LedgerPostingService(
 			TransactionJpaRepository transactionJpaRepository,
 			TransactionEntryJpaRepository transactionEntryJpaRepository,
+			LedgerEventJpaRepository ledgerEventJpaRepository,
 			AccountJpaRepository accountJpaRepository,
 			AccountBalanceJpaRepository accountBalanceJpaRepository,
-			EntityManager entityManager) {
+			EntityManager entityManager,
+			ObjectMapper objectMapper) {
 		this.transactionJpaRepository = Objects.requireNonNull(transactionJpaRepository);
 		this.transactionEntryJpaRepository = Objects.requireNonNull(transactionEntryJpaRepository);
+		this.ledgerEventJpaRepository = Objects.requireNonNull(ledgerEventJpaRepository);
 		this.accountJpaRepository = Objects.requireNonNull(accountJpaRepository);
 		this.accountBalanceJpaRepository = Objects.requireNonNull(accountBalanceJpaRepository);
 		this.entityManager = Objects.requireNonNull(entityManager);
+		this.objectMapper = Objects.requireNonNull(objectMapper);
 	}
 
 	@Transactional(isolation = Isolation.SERIALIZABLE)
@@ -73,21 +85,31 @@ public class LedgerPostingService {
 		validateAccounts(command, accountIds, lockedAccounts);
 
 		Currency currency = new Currency(lockedAccounts.getFirst().getCurrency());
-		LedgerTransaction domainTransaction = buildDomainTransaction(command, currency);
+		UUID transactionId = UUID.randomUUID();
+		Instant occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+		LedgerTransaction domainTransaction = buildDomainTransaction(command, currency, transactionId, occurredAt);
 
-		TransactionEntity txEntity = LedgerPersistenceMapper.toTransactionEntity(domainTransaction,
-				TransactionStatusEntity.POSTED);
+		int inserted = entityManager.createNativeQuery(
+				"insert into transactions (id, reference_key, status, created_at) " +
+						"values (:id, :referenceKey, 'POSTED'::transaction_status, :createdAt) " +
+						"on conflict (reference_key) do nothing")
+				.setParameter("id", transactionId)
+				.setParameter("referenceKey", command.referenceKey())
+				.setParameter("createdAt", occurredAt)
+				.executeUpdate();
+		if (inserted == 0) {
+			TransactionEntity concurrent = transactionJpaRepository.findByReferenceKey(command.referenceKey())
+					.orElseThrow(() -> new DomainException("Transaction already exists but could not be loaded"));
+			return concurrent.getId();
+		}
+
+		LedgerTransactionRecordedEvent recordedEvent = buildRecordedEvent(domainTransaction, currency);
+		LedgerEventEntity eventEntity = LedgerEventPersistenceMapper.toEntity(recordedEvent);
 		List<TransactionEntryEntity> entryEntities = LedgerPersistenceMapper
 				.toTransactionEntryEntities(domainTransaction);
 
-		try {
-			transactionJpaRepository.save(Objects.requireNonNull(txEntity));
-			transactionEntryJpaRepository.saveAll(Objects.requireNonNull(entryEntities));
-		} catch (DataIntegrityViolationException e) {
-			TransactionEntity concurrent = transactionJpaRepository.findByReferenceKey(command.referenceKey())
-					.orElseThrow(() -> new DomainException("Transaction persistence failed", e));
-			return concurrent.getId();
-		}
+		ledgerEventJpaRepository.save(Objects.requireNonNull(eventEntity));
+		transactionEntryJpaRepository.saveAll(Objects.requireNonNull(entryEntities));
 
 		Map<UUID, AccountTypeEntity> accountTypes = new HashMap<>();
 		for (AccountEntity a : lockedAccounts) {
@@ -95,6 +117,50 @@ public class LedgerPostingService {
 		}
 		applyBalanceUpdates(domainTransaction.entries(), accountTypes);
 		return domainTransaction.id();
+	}
+
+	private LedgerTransactionRecordedEvent buildRecordedEvent(LedgerTransaction transaction, Currency currency) {
+		Objects.requireNonNull(transaction, "transaction is required");
+		Objects.requireNonNull(currency, "currency is required");
+
+		String payload = buildPayload(transaction, currency);
+		String referenceId = transaction.referenceKey().value();
+		String correlationId = referenceId;
+
+		return new LedgerTransactionRecordedEvent(
+				UUID.randomUUID(),
+				"LEDGER",
+				transaction.id(),
+				1L,
+				"LEDGER_TRANSACTION_RECORDED",
+				payload,
+				transaction.occurredAt(),
+				correlationId,
+				referenceId);
+	}
+
+	private String buildPayload(LedgerTransaction transaction, Currency currency) {
+		LinkedHashMap<String, Object> root = new LinkedHashMap<>();
+		root.put("transaction_id", transaction.id().toString());
+		root.put("reference_key", transaction.referenceKey().value());
+		root.put("occurred_at", transaction.occurredAt().toString());
+		root.put("currency", currency.code());
+
+		List<LinkedHashMap<String, Object>> legs = new ArrayList<>(transaction.entries().size());
+		for (LedgerEntry e : transaction.entries()) {
+			LinkedHashMap<String, Object> leg = new LinkedHashMap<>();
+			leg.put("account_id", e.accountId().value());
+			leg.put("entry_type", e.type().name());
+			leg.put("amount", e.amount().amount().toPlainString());
+			legs.add(leg);
+		}
+		root.put("entries", legs);
+
+		try {
+			return objectMapper.writeValueAsString(root);
+		} catch (JsonProcessingException e) {
+			throw new DomainException("Failed to serialize ledger event payload", e);
+		}
 	}
 
 	private static Set<UUID> extractAccountIds(List<PostTransactionCommand.Entry> entries) {
@@ -127,7 +193,8 @@ public class LedgerPostingService {
 		}
 	}
 
-	private static LedgerTransaction buildDomainTransaction(PostTransactionCommand command, Currency currency) {
+	private static LedgerTransaction buildDomainTransaction(PostTransactionCommand command, Currency currency,
+			UUID transactionId, Instant occurredAt) {
 		List<LedgerEntry> entries = command.entries().stream()
 				.map(e -> new LedgerEntry(
 						new AccountId(e.accountId()),
@@ -136,8 +203,8 @@ public class LedgerPostingService {
 				.toList();
 
 		return new LedgerTransaction(
-				UUID.randomUUID(),
-				Instant.now(),
+				transactionId,
+				occurredAt,
 				new ReferenceKey(command.referenceKey()),
 				entries);
 	}

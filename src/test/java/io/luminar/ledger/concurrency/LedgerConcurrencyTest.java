@@ -174,6 +174,12 @@ class LedgerConcurrencyTest {
 			TransactionEntity tx = transactionJpaRepository.findByReferenceKey(referenceKey).orElseThrow();
 			assertEquals(referenceKey, tx.getReferenceKey());
 
+			Number eventCount = (Number) entityManager.createNativeQuery(
+					"select count(*) from ledger_events where reference_id = :referenceId")
+					.setParameter("referenceId", referenceKey)
+					.getSingleResult();
+			assertEquals(1L, eventCount.longValue());
+
 			Object[] row = (Object[]) entityManager.createNativeQuery(
 					"select " +
 							"count(*) as entry_count, " +

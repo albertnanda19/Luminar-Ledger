@@ -19,7 +19,7 @@ import java.util.concurrent.locks.LockSupport;
 
 @Service
 public class TransactionApplicationService {
-	private static final int MAX_ATTEMPTS = 15;
+	private static final int MAX_ATTEMPTS = 40;
 	private static final String SERIALIZATION_FAILURE_SQLSTATE = "40001";
 
 	private final TransactionJpaRepository transactionJpaRepository;
@@ -100,10 +100,10 @@ public class TransactionApplicationService {
 	private static void backoff(String referenceKey, int attempt) {
 		Objects.requireNonNull(referenceKey, "referenceKey is required");
 		int seed = 31 * referenceKey.hashCode() + attempt;
-		long jitterMs = Math.floorMod(seed, 3);
-		long exp = 1L << Math.min(3, Math.max(0, attempt - 1));
-		long baseMs = Math.min(10L, exp + ((attempt - 1L) / 2L));
-		long sleepMs = Math.min(10L, baseMs + jitterMs);
+		long jitterMs = Math.floorMod(seed, 11);
+		long exp = 1L << Math.min(7, Math.max(0, attempt - 1));
+		long baseMs = Math.min(200L, 5L * exp);
+		long sleepMs = Math.min(250L, baseMs + jitterMs);
 		LockSupport.parkNanos(sleepMs * 1_000_000L);
 	}
 }
