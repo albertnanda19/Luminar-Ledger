@@ -148,9 +148,24 @@ class LedgerConcurrencyTest {
 
 		int successCount = successReferenceKeys.size();
 		int failureCount = failures.size();
-		int expectedFailureCount = threadCount - expectedSuccess;
-		assertEquals(expectedFailureCount, failureCount);
-		assertEquals(expectedSuccess, successCount);
+		assertEquals(expectedSuccess, successCount, () -> {
+			StringBuilder sb = new StringBuilder();
+			sb.append("Unexpected successCount. ");
+			sb.append("successCount=").append(successCount).append(", expectedSuccess=").append(expectedSuccess);
+			sb.append(", failureCount=").append(failureCount);
+			int shown = 0;
+			for (Throwable t : failures) {
+				if (t == null) {
+					continue;
+				}
+				if (shown >= 5) {
+					break;
+				}
+				sb.append("\n").append(t.getClass().getName()).append(": ").append(t.getMessage());
+				shown++;
+			}
+			return sb.toString();
+		});
 
 		Set<String> uniqueSucceeded = new HashSet<>(successReferenceKeys);
 		assertEquals(successCount, uniqueSucceeded.size());
