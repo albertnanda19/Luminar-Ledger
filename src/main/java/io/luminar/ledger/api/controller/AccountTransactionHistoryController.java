@@ -2,7 +2,7 @@ package io.luminar.ledger.api.controller;
 
 import io.luminar.ledger.api.dto.response.AccountTransactionHistoryResponse;
 import io.luminar.ledger.api.dto.response.TransactionHistoryItem;
-import io.luminar.ledger.api.query.AccountTransactionHistoryQuery;
+import io.luminar.ledger.application.account.AccountTransactionHistoryReadService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -21,11 +21,12 @@ public class AccountTransactionHistoryController {
 	private static final int DEFAULT_LIMIT = 50;
 	private static final int MAX_LIMIT = 200;
 
-	private final AccountTransactionHistoryQuery accountTransactionHistoryQuery;
+	private final AccountTransactionHistoryReadService accountTransactionHistoryReadService;
 
-	public AccountTransactionHistoryController(AccountTransactionHistoryQuery accountTransactionHistoryQuery) {
-		this.accountTransactionHistoryQuery = Objects.requireNonNull(accountTransactionHistoryQuery,
-				"AccountTransactionHistoryController.accountTransactionHistoryQuery is required");
+	public AccountTransactionHistoryController(
+			AccountTransactionHistoryReadService accountTransactionHistoryReadService) {
+		this.accountTransactionHistoryReadService = Objects.requireNonNull(accountTransactionHistoryReadService,
+				"AccountTransactionHistoryController.accountTransactionHistoryReadService is required");
 	}
 
 	@GetMapping("/{accountId}/transactions")
@@ -33,12 +34,15 @@ public class AccountTransactionHistoryController {
 			@PathVariable UUID accountId,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
+			@RequestParam(required = false) Integer page,
+			@RequestParam(required = false) Integer size,
 			@RequestParam(required = false) Integer limit) {
 		Objects.requireNonNull(accountId, "accountId is required");
 
-		int effectiveLimit = normalizeLimit(limit);
-		List<TransactionHistoryItem> transactions = accountTransactionHistoryQuery
-				.findByAccountId(accountId, from, to, effectiveLimit);
+		int effectivePage = normalizePage(page);
+		int effectiveSize = normalizeLimit(size != null ? size : limit);
+		List<TransactionHistoryItem> transactions = accountTransactionHistoryReadService
+				.findByAccountId(accountId, from, to, effectivePage, effectiveSize);
 
 		return new AccountTransactionHistoryResponse(accountId, transactions);
 	}
@@ -53,5 +57,12 @@ public class AccountTransactionHistoryController {
 		}
 
 		return Math.min(limit, MAX_LIMIT);
+	}
+
+	private static int normalizePage(Integer page) {
+		if (page == null) {
+			return 0;
+		}
+		return Math.max(0, page);
 	}
 }

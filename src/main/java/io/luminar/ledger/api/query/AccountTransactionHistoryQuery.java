@@ -22,8 +22,11 @@ public class AccountTransactionHistoryQuery {
 	}
 
 	@Transactional(readOnly = true)
-	public List<TransactionHistoryItem> findByAccountId(UUID accountId, Instant from, Instant to, int limit) {
+	public List<TransactionHistoryItem> findByAccountId(UUID accountId, Instant from, Instant to, int page, int size) {
 		Objects.requireNonNull(accountId, "accountId is required");
+		int safePage = Math.max(0, page);
+		int safeSize = Math.max(1, size);
+		int offset = Math.multiplyExact(safePage, safeSize);
 
 		StringBuilder sql = new StringBuilder();
 		sql.append("select p.transaction_id, p.reference_key, p.direction::text, p.amount, p.occurred_at ");
@@ -41,7 +44,8 @@ public class AccountTransactionHistoryQuery {
 
 		var query = entityManager.createNativeQuery(sql.toString())
 				.setParameter("accountId", accountId)
-				.setMaxResults(limit);
+				.setFirstResult(offset)
+				.setMaxResults(safeSize);
 		if (from != null) {
 			query.setParameter("from", from);
 		}
