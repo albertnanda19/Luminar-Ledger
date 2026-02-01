@@ -4,8 +4,7 @@ import io.luminar.ledger.api.dto.request.PostTransactionRequest;
 import io.luminar.ledger.api.dto.response.PostTransactionResponse;
 import io.luminar.ledger.application.transaction.TransactionApplicationService;
 import io.luminar.ledger.application.transaction.command.PostTransactionCommand;
-import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntity;
-import io.luminar.ledger.infrastructure.persistence.ledger.TransactionJpaRepository;
+import io.luminar.ledger.service.PostedTransaction;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,31 +13,25 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/v1/transactions")
 public class TransactionController {
 	private final TransactionApplicationService transactionApplicationService;
-	private final TransactionJpaRepository transactionJpaRepository;
 
-	public TransactionController(TransactionApplicationService transactionApplicationService,
-			TransactionJpaRepository transactionJpaRepository) {
+	public TransactionController(TransactionApplicationService transactionApplicationService) {
 		this.transactionApplicationService = Objects.requireNonNull(transactionApplicationService);
-		this.transactionJpaRepository = Objects.requireNonNull(transactionJpaRepository);
 	}
 
 	@PostMapping
 	public PostTransactionResponse post(@Valid @RequestBody PostTransactionRequest request) {
-		UUID transactionId = Objects.requireNonNull(
+		PostedTransaction posted = Objects.requireNonNull(
 				transactionApplicationService.post(toCommand(request)),
 				"TransactionApplicationService.post returned null");
-		TransactionEntity persisted = transactionJpaRepository.findById(transactionId)
-				.orElseThrow(() -> new IllegalStateException("Transaction not found after posting: " + transactionId));
 		return new PostTransactionResponse(
-				persisted.getId(),
-				persisted.getReferenceKey(),
-				persisted.getCreatedAt());
+				posted.transactionId(),
+				posted.referenceKey(),
+				posted.postedAt());
 	}
 
 	private static PostTransactionCommand toCommand(PostTransactionRequest request) {

@@ -207,7 +207,7 @@ class TransactionHistoryReadThroughCacheIntegrationTest {
 		PostTransactionCommand cmd = new PostTransactionCommand(referenceKey, List.of(
 				new PostTransactionCommand.Entry(sourceAccountId, PostTransactionCommand.EntryType.DEBIT, AMOUNT),
 				new PostTransactionCommand.Entry(targetAccountId, PostTransactionCommand.EntryType.CREDIT, AMOUNT)));
-		return transactionApplicationService.post(cmd);
+		return transactionApplicationService.post(cmd).transactionId();
 	}
 
 	private void seedBalance(UUID accountId, BigDecimal balance) {

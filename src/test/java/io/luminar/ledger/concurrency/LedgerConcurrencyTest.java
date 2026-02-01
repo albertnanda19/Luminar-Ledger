@@ -127,7 +127,7 @@ class LedgerConcurrencyTest {
 										PostTransactionCommand.EntryType.CREDIT,
 										AMOUNT_PER_TX)));
 
-						UUID txId = transactionApplicationService.post(command);
+						UUID txId = transactionApplicationService.post(command).transactionId();
 						assertNotNull(txId);
 						successReferenceKeys.add(referenceKey);
 					} catch (Throwable t) {

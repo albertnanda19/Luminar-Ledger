@@ -62,7 +62,7 @@ class LedgerEventIntegrationTest {
 				new PostTransactionCommand.Entry(sourceAccountId, PostTransactionCommand.EntryType.DEBIT, AMOUNT),
 				new PostTransactionCommand.Entry(targetAccountId, PostTransactionCommand.EntryType.CREDIT, AMOUNT)));
 
-		UUID txId = transactionApplicationService.post(cmd);
+		UUID txId = transactionApplicationService.post(cmd).transactionId();
 		assertNotNull(txId);
 
 		Object[] eventRow = (Object[]) entityManager.createNativeQuery(
@@ -133,7 +133,7 @@ class LedgerEventIntegrationTest {
 
 		assertEquals(dbLegs, payloadLegs);
 
-		UUID txId2 = transactionApplicationService.post(cmd);
+		UUID txId2 = transactionApplicationService.post(cmd).transactionId();
 		assertEquals(txId, txId2);
 
 		Number eventCount = (Number) entityManager.createNativeQuery(

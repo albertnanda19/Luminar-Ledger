@@ -31,9 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(
-		webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-		properties = "spring.task.scheduling.enabled=false")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "spring.task.scheduling.enabled=false")
 class TransactionHistoryProjectionIntegrationTest {
 	private static final String CURRENCY = "USD";
 	private static final BigDecimal INITIAL_SOURCE_BALANCE = new BigDecimal("1000.000000");
@@ -73,7 +71,7 @@ class TransactionHistoryProjectionIntegrationTest {
 				new PostTransactionCommand.Entry(sourceAccountId, PostTransactionCommand.EntryType.DEBIT, AMOUNT),
 				new PostTransactionCommand.Entry(targetAccountId, PostTransactionCommand.EntryType.CREDIT, AMOUNT)));
 
-		UUID txId = transactionApplicationService.post(cmd);
+		UUID txId = transactionApplicationService.post(cmd).transactionId();
 		assertNotNull(txId);
 
 		projectUntilCaughtUp();
@@ -155,9 +153,9 @@ class TransactionHistoryProjectionIntegrationTest {
 				Objects.requireNonNull(transactionManager, "transactionManager is required"));
 		txTemplate.executeWithoutResult(status -> {
 			entityManager.createNativeQuery(
-						"update projection_checkpoints set last_sequence_number = 0 where projection_type = :projectionType")
-				.setParameter("projectionType", LedgerEventProjector.TRANSACTION_HISTORY_PROJECTION_TYPE)
-				.executeUpdate();
+					"update projection_checkpoints set last_sequence_number = 0 where projection_type = :projectionType")
+					.setParameter("projectionType", LedgerEventProjector.TRANSACTION_HISTORY_PROJECTION_TYPE)
+					.executeUpdate();
 			entityManager.flush();
 		});
 	}
@@ -169,9 +167,9 @@ class TransactionHistoryProjectionIntegrationTest {
 			entityManager.createNativeQuery("truncate table transaction_history_projection").executeUpdate();
 			entityManager.createNativeQuery("truncate table projection_event_dedup").executeUpdate();
 			entityManager.createNativeQuery(
-						"delete from projection_checkpoints where projection_type = :projectionType")
-				.setParameter("projectionType", LedgerEventProjector.TRANSACTION_HISTORY_PROJECTION_TYPE)
-				.executeUpdate();
+					"delete from projection_checkpoints where projection_type = :projectionType")
+					.setParameter("projectionType", LedgerEventProjector.TRANSACTION_HISTORY_PROJECTION_TYPE)
+					.executeUpdate();
 			entityManager.flush();
 		});
 	}
@@ -190,10 +188,10 @@ class TransactionHistoryProjectionIntegrationTest {
 				Objects.requireNonNull(transactionManager, "transactionManager is required"));
 		txTemplate.executeWithoutResult(status -> {
 			int updated = entityManager.createQuery(
-						"update AccountBalanceEntity b set b.balance = :balance where b.accountId = :accountId")
-				.setParameter("balance", balance)
-				.setParameter("accountId", accountId)
-				.executeUpdate();
+					"update AccountBalanceEntity b set b.balance = :balance where b.accountId = :accountId")
+					.setParameter("balance", balance)
+					.setParameter("accountId", accountId)
+					.executeUpdate();
 			if (updated != 1) {
 				throw new IllegalStateException("Failed to seed account balance");
 			}

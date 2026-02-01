@@ -84,7 +84,7 @@ class AccountLifecycleIntegrationTest {
 		accountApplicationService.unfreeze(new UnfreezeAccountCommand(targetAccountId, "DISPUTE_RESOLVED"));
 
 		PostTransactionCommand cmd = transfer("tx-unfrozen-" + runId, sourceAccountId, targetAccountId);
-		UUID txId = transactionApplicationService.post(cmd);
+		UUID txId = transactionApplicationService.post(cmd).transactionId();
 		assertNotNull(txId);
 	}
 
@@ -116,7 +116,7 @@ class AccountLifecycleIntegrationTest {
 				Objects.requireNonNull(transactionManager, "PlatformTransactionManager is required"));
 		txTemplate.executeWithoutResult(status -> {
 			int updated = entityManager.createQuery(
-						"update AccountBalanceEntity b set b.balance = :balance where b.accountId = :accountId")
+					"update AccountBalanceEntity b set b.balance = :balance where b.accountId = :accountId")
 					.setParameter("balance", balance)
 					.setParameter("accountId", accountId)
 					.executeUpdate();

@@ -1,16 +1,13 @@
-package io.luminar.ledger.cache;
+package io.luminar.ledger.idempotency;
 
 import io.luminar.ledger.TestcontainersConfiguration;
 import io.luminar.ledger.application.account.AccountApplicationService;
-import io.luminar.ledger.application.account.AccountTransactionHistoryReadService;
 import io.luminar.ledger.application.account.command.CreateAccountCommand;
 import io.luminar.ledger.application.transaction.TransactionApplicationService;
 import io.luminar.ledger.application.transaction.command.PostTransactionCommand;
 import io.luminar.ledger.domain.account.AccountType;
-import io.luminar.ledger.infrastructure.projection.LedgerEventProjector;
+import io.luminar.ledger.service.PostedTransaction;
 import jakarta.persistence.EntityManager;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,6 +17,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
@@ -27,16 +26,21 @@ import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Import(TestcontainersConfiguration.class)
-@SpringBootTest(properties = "spring.task.scheduling.enabled=false")
-class TransactionHistoryReadThroughCacheRedisDownFallbackIntegrationTest {
+@SpringBootTest(properties = {
+		"spring.task.scheduling.enabled=false",
+		"ledger.idempotency.ttl-seconds=1"
+})
+@Testcontainers
+class GlobalIdempotencyTtlExpiryIntegrationTest {
 	private static final String CURRENCY = "USD";
 	private static final BigDecimal INITIAL_SOURCE_BALANCE = new BigDecimal("1000.000000");
 	private static final BigDecimal AMOUNT = new BigDecimal("10.000000");
 
+	@Container
 	@SuppressWarnings("resource")
 	private static final GenericContainer<?> redis = new GenericContainer<>(
 			DockerImageName.parse("redis:7-alpine"))
@@ -44,15 +48,12 @@ class TransactionHistoryReadThroughCacheRedisDownFallbackIntegrationTest {
 
 	@DynamicPropertySource
 	static void registerRedisProperties(DynamicPropertyRegistry registry) {
-		redis.start();
+		if (!redis.isRunning()) {
+			redis.start();
+		}
 		registry.add("spring.data.redis.host", redis::getHost);
 		registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
 		registry.add("spring.data.redis.timeout", () -> "100ms");
-	}
-
-	@AfterAll
-	static void stopRedis() {
-		redis.stop();
 	}
 
 	@Autowired
@@ -62,47 +63,40 @@ class TransactionHistoryReadThroughCacheRedisDownFallbackIntegrationTest {
 	private TransactionApplicationService transactionApplicationService;
 
 	@Autowired
-	private LedgerEventProjector ledgerEventProjector;
-
-	@Autowired
-	private AccountTransactionHistoryReadService accountTransactionHistoryReadService;
+	private PlatformTransactionManager transactionManager;
 
 	@Autowired
 	private EntityManager entityManager;
 
-	@Autowired
-	private PlatformTransactionManager transactionManager;
-
-	@BeforeEach
-	void stopRedisBeforeTest() {
-		if (redis.isRunning()) {
-			redis.stop();
-		}
-	}
-
 	@Test
-	void redisDown_mustFallbackToDb_andRequestMustNotFail() {
+	void ttlExpiry_cacheMayExpire_butDbIdempotencyMustStillReturnDeterministicResult() throws Exception {
 		String runId = UUID.randomUUID().toString();
 		UUID sourceAccountId = createAccount("SRC-" + runId);
 		UUID targetAccountId = createAccount("TGT-" + runId);
 		seedBalance(sourceAccountId, INITIAL_SOURCE_BALANCE);
 
-		UUID txId = postTransferTransaction(sourceAccountId, targetAccountId, "tx-redis-down-" + runId);
-		assertNotNull(txId);
-		projectUntilCaughtUp();
+		String referenceKey = "idem-ttl-" + runId;
+		PostTransactionCommand cmd = new PostTransactionCommand(referenceKey, List.of(
+				new PostTransactionCommand.Entry(sourceAccountId, PostTransactionCommand.EntryType.DEBIT, AMOUNT),
+				new PostTransactionCommand.Entry(targetAccountId, PostTransactionCommand.EntryType.CREDIT, AMOUNT)));
 
-		var result = accountTransactionHistoryReadService.findByAccountId(sourceAccountId, null, null, 0, 50);
-		assertTrue(result.stream().anyMatch(i -> txId.equals(i.getTransactionId())));
+		PostedTransaction first = transactionApplicationService.post(cmd);
+		assertNotNull(first.transactionId());
+		assertEquals(1L, countTransactions(referenceKey));
+
+		Thread.sleep(1200);
+
+		PostedTransaction second = transactionApplicationService.post(cmd);
+		assertEquals(first.transactionId(), second.transactionId());
+		assertEquals(1L, countTransactions(referenceKey));
 	}
 
-	private void projectUntilCaughtUp() {
-		for (int i = 0; i < 10; i++) {
-			int processed = ledgerEventProjector.projectOnce();
-			if (processed == 0) {
-				return;
-			}
-		}
-		throw new IllegalStateException("Projector did not catch up within expected iterations");
+	private long countTransactions(String referenceKey) {
+		Number count = (Number) entityManager.createNativeQuery(
+				"select count(*) from transactions where reference_key = :referenceKey")
+				.setParameter("referenceKey", referenceKey)
+				.getSingleResult();
+		return count.longValue();
 	}
 
 	private UUID createAccount(String code) {
@@ -112,13 +106,6 @@ class TransactionHistoryReadThroughCacheRedisDownFallbackIntegrationTest {
 				AccountType.ASSET,
 				CURRENCY)), "AccountApplicationService.create returned null");
 		return accountId;
-	}
-
-	private UUID postTransferTransaction(UUID sourceAccountId, UUID targetAccountId, String referenceKey) {
-		PostTransactionCommand cmd = new PostTransactionCommand(referenceKey, List.of(
-				new PostTransactionCommand.Entry(sourceAccountId, PostTransactionCommand.EntryType.DEBIT, AMOUNT),
-				new PostTransactionCommand.Entry(targetAccountId, PostTransactionCommand.EntryType.CREDIT, AMOUNT)));
-		return transactionApplicationService.post(cmd).transactionId();
 	}
 
 	private void seedBalance(UUID accountId, BigDecimal balance) {

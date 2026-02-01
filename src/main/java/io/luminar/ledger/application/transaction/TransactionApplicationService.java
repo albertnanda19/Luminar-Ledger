@@ -1,8 +1,8 @@
 package io.luminar.ledger.application.transaction;
 
 import io.luminar.ledger.application.transaction.command.PostTransactionCommand;
-import io.luminar.ledger.infrastructure.persistence.ledger.TransactionEntity;
-import io.luminar.ledger.infrastructure.persistence.ledger.TransactionJpaRepository;
+import io.luminar.ledger.application.transaction.idempotency.GlobalIdempotencyCache;
+import io.luminar.ledger.service.PostedTransaction;
 import io.luminar.ledger.service.LedgerPostingService;
 import com.zaxxer.hikari.HikariDataSource;
 import org.springframework.stereotype.Service;
@@ -12,8 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.LockSupport;
 
@@ -22,38 +20,43 @@ public class TransactionApplicationService {
 	private static final int MAX_ATTEMPTS = 40;
 	private static final String SERIALIZATION_FAILURE_SQLSTATE = "40001";
 
-	private final TransactionJpaRepository transactionJpaRepository;
 	private final LedgerPostingService ledgerPostingService;
+	private final GlobalIdempotencyCache globalIdempotencyCache;
 	private final Semaphore postingConcurrency;
 
-	public TransactionApplicationService(TransactionJpaRepository transactionJpaRepository,
-			LedgerPostingService ledgerPostingService,
+	public TransactionApplicationService(LedgerPostingService ledgerPostingService,
+			GlobalIdempotencyCache globalIdempotencyCache,
 			DataSource dataSource) {
-		this.transactionJpaRepository = Objects.requireNonNull(transactionJpaRepository);
 		this.ledgerPostingService = Objects.requireNonNull(ledgerPostingService);
+		this.globalIdempotencyCache = Objects.requireNonNull(globalIdempotencyCache);
 		this.postingConcurrency = new Semaphore(resolvePostingPermits(dataSource), true);
 	}
 
 	@Transactional(propagation = Propagation.NOT_SUPPORTED)
-	public UUID post(PostTransactionCommand command) {
+	public PostedTransaction post(PostTransactionCommand command) {
 		Objects.requireNonNull(command, "PostTransactionCommand is required");
+		String referenceKey = command.referenceKey();
 		acquirePostingPermit();
 		try {
-			Optional<TransactionEntity> existing = transactionJpaRepository.findByReferenceKey(command.referenceKey());
-			if (existing.isPresent()) {
-				return existing.get().getId();
+			PostedTransaction replay = globalIdempotencyCache.acquireOrReplayCompleted(referenceKey);
+			if (replay != null) {
+				return replay;
 			}
 
 			RuntimeException last = null;
 			for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 				try {
-					return ledgerPostingService.post(command);
+					PostedTransaction posted = Objects.requireNonNull(ledgerPostingService.post(command),
+							"LedgerPostingService.post returned null");
+					globalIdempotencyCache.markCompleted(posted);
+					return posted;
 				} catch (RuntimeException e) {
 					last = e;
 					if (!isSerializationFailure(e) || attempt == MAX_ATTEMPTS) {
+						globalIdempotencyCache.markFailed(referenceKey);
 						throw e;
 					}
-					backoff(command.referenceKey(), attempt);
+					backoff(referenceKey, attempt);
 				}
 			}
 

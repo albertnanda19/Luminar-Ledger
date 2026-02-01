@@ -72,12 +72,13 @@ public class LedgerPostingService {
 	}
 
 	@Transactional(isolation = Isolation.SERIALIZABLE)
-	public UUID post(PostTransactionCommand command) {
+	public PostedTransaction post(PostTransactionCommand command) {
 		Objects.requireNonNull(command, "PostTransactionCommand is required");
 
 		Optional<TransactionEntity> existing = transactionJpaRepository.findByReferenceKey(command.referenceKey());
 		if (existing.isPresent()) {
-			return existing.get().getId();
+			TransactionEntity entity = existing.get();
+			return new PostedTransaction(entity.getId(), entity.getReferenceKey(), entity.getCreatedAt());
 		}
 
 		Set<UUID> accountIds = extractAccountIds(command.entries());
@@ -100,7 +101,7 @@ public class LedgerPostingService {
 		if (inserted == 0) {
 			TransactionEntity concurrent = transactionJpaRepository.findByReferenceKey(command.referenceKey())
 					.orElseThrow(() -> new DomainException("Transaction already exists but could not be loaded"));
-			return concurrent.getId();
+			return new PostedTransaction(concurrent.getId(), concurrent.getReferenceKey(), concurrent.getCreatedAt());
 		}
 
 		LedgerTransactionRecordedEvent recordedEvent = buildRecordedEvent(domainTransaction, currency);
@@ -116,7 +117,7 @@ public class LedgerPostingService {
 			accountTypes.put(a.getId(), a.getType());
 		}
 		applyBalanceUpdates(domainTransaction.entries(), accountTypes);
-		return domainTransaction.id();
+		return new PostedTransaction(domainTransaction.id(), command.referenceKey(), occurredAt);
 	}
 
 	private LedgerTransactionRecordedEvent buildRecordedEvent(LedgerTransaction transaction, Currency currency) {
